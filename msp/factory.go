@@ -19,6 +19,7 @@ const (
 	MSPv1_1
 	MSPv1_3
 	MSPv1_4_3
+	MSPv1_4_4
 )
 
 // NewOpts represent
@@ -59,6 +60,8 @@ func New(opts NewOpts, cryptoProvider bccsp.BCCSP) (MSP, error) {
 			return newBccspMsp(MSPv1_3, cryptoProvider)
 		case MSPv1_4_3:
 			return newBccspMsp(MSPv1_4_3, cryptoProvider)
+		case MSPv1_4_4:
+			return newBccspMsp(MSPv1_4_4, cryptoProvider)
 		default:
 			return nil, errors.Errorf("Invalid *BCCSPNewOpts. Version not recognized [%v]", opts.GetVersion())
 		}
