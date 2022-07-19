@@ -1420,7 +1420,7 @@ func updateConfigWithNewCertsForPeer(network *nwo.Network, tempCryptoDir string,
 			Type:   oldConfig.Type,
 			Config: protoutil.MarshalOrPanic(oldMspConfig),
 		})
-	nwo.UpdateConfig(network, orderer, channelID, currentConfig, updatedConfig, false, network.Peer(org.Name, "peer0"))
+	nwo.UpdateConfig(network, orderer, channelID, currentConfig, updatedConfig, false, network.Peer(org.Name, "peer0"), nil)
 }
 
 // updateOldMspConfigWithNewMspConfig updates the oldMspConfig with certs from the newMspConfig
