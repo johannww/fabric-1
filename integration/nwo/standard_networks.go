@@ -181,30 +181,6 @@ func MultiChannelBasicSolo() *Config {
 	return config
 }
 
-func Ed25519Solo() *Config {
-	config := BasicSolo()
-
-	config.Peers = append(
-		config.Peers,
-		&Peer{
-			Name:         "peer1",
-			Organization: "Org1",
-		},
-	)
-	config.Peers = append(
-		config.Peers,
-		&Peer{
-			Name:         "peer2",
-			Organization: "Org1",
-			Channels: []*PeerChannel{
-				{Name: "testchannel", Anchor: true},
-			},
-		},
-	)
-
-	return config
-}
-
 func BasicKafka() *Config {
 	config := BasicSolo()
 
