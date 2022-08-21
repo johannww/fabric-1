@@ -335,12 +335,6 @@ func TestED25519Keys(t *testing.T) {
 		t.Fatalf("Failed converting DER to private key [%s]", err)
 	}
 
-	// Nil Private Key <-> PEM
-	_, err = privateKeyToPEM(nil, nil)
-	if err == nil {
-		t.Fatal("PublicKeyToPEM should fail on nil")
-	}
-
 	_, err = privateKeyToPEM((ed25519.PrivateKey)(nil), nil)
 	if err == nil {
 		t.Fatal("PrivateKeyToPEM should fail on nil")
@@ -396,22 +390,6 @@ func TestED25519Keys(t *testing.T) {
 		t.Fatalf("Failed converting DER to public key [%s]", err)
 	}
 
-	// Nil Public Key <-> PEM
-	_, err = publicKeyToPEM(nil, nil)
-	if err == nil {
-		t.Fatal("PublicKeyToPEM should fail on nil")
-	}
-
-	_, err = pemToPublicKey(nil, nil)
-	if err == nil {
-		t.Fatal("PEMtoPublicKey should fail on nil")
-	}
-
-	_, err = pemToPublicKey([]byte{0, 1, 3, 4}, nil)
-	if err == nil {
-		t.Fatal("PEMtoPublicKey should fail on invalid PEM")
-	}
-
 	// Public Key Encrypted PEM format
 	encPEM, err = publicKeyToPEM(pub, []byte("passwd"))
 	if err != nil {
@@ -432,21 +410,6 @@ func TestED25519Keys(t *testing.T) {
 	_, err = pemToPublicKey(encPEM, []byte("passw"))
 	if err == nil {
 		t.Fatal("PEMtoPublicKey should fail on nil password")
-	}
-
-	_, err = pemToPublicKey(nil, []byte("passwd"))
-	if err == nil {
-		t.Fatal("PEMtoPublicKey should fail on nil PEM")
-	}
-
-	_, err = pemToPublicKey([]byte{0, 1, 3, 4}, []byte("passwd"))
-	if err == nil {
-		t.Fatal("PEMtoPublicKey should fail on invalid PEM")
-	}
-
-	_, err = pemToPublicKey(nil, []byte("passw"))
-	if err == nil {
-		t.Fatal("PEMtoPublicKey should fail on nil PEM and wrong password")
 	}
 
 	// Public Key DER format
