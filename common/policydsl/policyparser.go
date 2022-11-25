@@ -141,7 +141,7 @@ func secondPass(args ...interface{}) (interface{}, error) {
 	}
 
 	/* get the n in the t out of n */
-	var n int = len(args) - 2
+	n := len(args) - 2
 
 	/* sanity check - t should be positive, permit equal to n+1, but disallow over n+1 */
 	if t < 0 || t > n+1 {
@@ -233,17 +233,17 @@ func newContext() *context {
 // GATE(P[, P])
 //
 // where:
-//	- GATE is either "and" or "or"
-//	- P is either a principal or another nested call to GATE
+//   - GATE is either "and" or "or"
+//   - P is either a principal or another nested call to GATE
 //
 // A principal is defined as:
 //
-// ORG.ROLE
+// # ORG.ROLE
 //
 // where:
-//	- ORG is a string (representing the MSP identifier)
-//	- ROLE takes the value of any of the RoleXXX constants representing
-//    the required role
+//   - ORG is a string (representing the MSP identifier)
+//   - ROLE takes the value of any of the RoleXXX constants representing
+//     the required role
 func FromString(policy string) (*cb.SignaturePolicyEnvelope, error) {
 	// first we translate the and/or business into outof gates
 	intermediate, err := govaluate.NewEvaluableExpressionWithFunctions(

@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -44,7 +44,7 @@ var _ = Describe("chaincode install", func() {
 		cwd, err := os.Getwd()
 		Expect(err).NotTo(HaveOccurred())
 
-		network = nwo.New(nwo.BasicSolo(), testDir, client, StartPort(), components)
+		network = nwo.New(nwo.BasicEtcdRaft(), testDir, client, StartPort(), components)
 		network.ExternalBuilders = append(network.ExternalBuilders, fabricconfig.ExternalBuilder{
 			Path:                 filepath.Join(cwd, "..", "externalbuilders", "golang"),
 			Name:                 "external-golang",

@@ -43,9 +43,7 @@ func TestSpawnEtcdRaft(t *testing.T) {
 
 	defer gexec.CleanupBuildArtifacts()
 
-	tempSharedDir, err := ioutil.TempDir("", "etcdraft-test")
-	gt.Expect(err).NotTo(HaveOccurred())
-	defer os.RemoveAll(tempSharedDir)
+	tempSharedDir := t.TempDir()
 
 	copyYamlFiles(gt, "testdata", tempSharedDir)
 
@@ -204,7 +202,7 @@ func testEtcdRaftOSNSuccess(gt *GomegaWithT, configPath, configtxgen, orderer, c
 	// Consensus.EvictionSuspicion is not specified in orderer.yaml, so let's ensure
 	// it is really configured autonomously via the etcdraft chain itself.
 	gt.Eventually(ordererProcess.Err, time.Minute).Should(gbytes.Say("EvictionSuspicion not set, defaulting to 10m"))
-	// Wait until the the node starts up and elects itself as a single leader in a single node cluster.
+	// Wait until the node starts up and elects itself as a single leader in a single node cluster.
 	gt.Eventually(ordererProcess.Err, time.Minute).Should(gbytes.Say("Beginning to serve requests"))
 	gt.Eventually(ordererProcess.Err, time.Minute).Should(gbytes.Say("becomeLeader"))
 }

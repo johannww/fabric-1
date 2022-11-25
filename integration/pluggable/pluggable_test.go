@@ -19,7 +19,7 @@ import (
 	"github.com/hyperledger/fabric/integration/nwo"
 	"github.com/hyperledger/fabric/integration/nwo/commands"
 	"github.com/hyperledger/fabric/integration/nwo/fabricconfig"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
@@ -59,16 +59,16 @@ var _ = Describe("EndToEnd", func() {
 		SetValidationPluginActivationFolder(dir)
 
 		// Speed up test by reducing the number of peers we bring up
-		soloConfig := nwo.BasicSolo()
-		soloConfig.RemovePeer("Org1", "peer1")
-		soloConfig.RemovePeer("Org2", "peer1")
-		Expect(soloConfig.Peers).To(HaveLen(2))
+		basicEtcdRaftConfig := nwo.BasicEtcdRaft()
+		basicEtcdRaftConfig.RemovePeer("Org1", "peer1")
+		basicEtcdRaftConfig.RemovePeer("Org2", "peer1")
+		Expect(basicEtcdRaftConfig.Peers).To(HaveLen(2))
 
 		// docker client
 		client, err = docker.NewClientFromEnv()
 		Expect(err).NotTo(HaveOccurred())
 
-		network = nwo.New(soloConfig, testDir, client, StartPort(), components)
+		network = nwo.New(basicEtcdRaftConfig, testDir, client, StartPort(), components)
 		network.GenerateConfigTree()
 
 		// modify config
@@ -113,7 +113,7 @@ var _ = Describe("EndToEnd", func() {
 		os.Remove(validationPluginPath)
 	})
 
-	It("executes a basic solo network with specified plugins", func() {
+	It("executes a basic etcdraft network with specified plugins", func() {
 		// Make sure plugins activated
 		peerCount := len(network.Peers)
 		activations := CountEndorsementPluginActivations()

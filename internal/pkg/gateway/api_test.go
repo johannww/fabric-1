@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 	ab "github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/hyperledger/fabric/common/crypto/tlsgen"
+	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/common/flogging/mock"
 	"github.com/hyperledger/fabric/common/ledger"
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/common"
@@ -37,12 +40,14 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 // The following private interfaces are here purely to prevent counterfeiter creating an import cycle in the unit test
+//
 //go:generate counterfeiter -o mocks/endorserclient.go --fake-name EndorserClient . endorserClient
 type endorserClient interface {
 	peer.EndorserClient
@@ -149,6 +154,7 @@ type testDef struct {
 type preparedTest struct {
 	server         *Server
 	ctx            context.Context
+	cancel         context.CancelFunc
 	signedProposal *peer.SignedProposal
 	localEndorser  *mocks.EndorserClient
 	discovery      *mocks.Discovery
@@ -159,6 +165,8 @@ type preparedTest struct {
 	ledgerProvider *ledgermocks.Provider
 	ledger         *ledgermocks.Ledger
 	blockIterator  *mocks.ResultsIterator
+	logLevel       string
+	logFields      []string
 }
 
 type contextKey string
@@ -471,14 +479,15 @@ func TestEvaluate(t *testing.T) {
 				"g1": {{endorser: localhostMock, height: 3}}, // msp1
 			},
 			postSetup: func(t *testing.T, def *preparedTest) {
-				var cancel context.CancelFunc
-				def.ctx, cancel = context.WithTimeout(def.ctx, 100*time.Millisecond)
+				def.ctx, def.cancel = context.WithTimeout(def.ctx, 100*time.Millisecond)
 
 				def.localEndorser.ProcessProposalStub = func(ctx context.Context, proposal *peer.SignedProposal, option ...grpc.CallOption) (*peer.ProposalResponse, error) {
-					cancel()
 					time.Sleep(200 * time.Millisecond)
 					return createProposalResponse(t, peer1Mock.address, "mock_response", 200, ""), nil
 				}
+			},
+			postTest: func(t *testing.T, def *preparedTest) {
+				def.cancel()
 			},
 			errCode:   codes.DeadlineExceeded,
 			errString: "evaluate timeout expired",
@@ -707,6 +716,33 @@ func TestEndorse(t *testing.T) {
 			errString:     "no endorsers found in the gateway's organization; retry specifying endorsing organization(s) to protect transient data",
 		},
 		{
+			name: "local and non-local endorsers with transient data will fail",
+			plan: endorsementPlan{
+				"g1": {{endorser: localhostMock, height: 3}}, // msp1
+				"g2": {{endorser: peer3Mock, height: 4}},     // msp2
+			},
+			layouts: []endorsementLayout{
+				{"g1": 1, "g2": 1},
+			},
+			members: []networkMember{
+				{"id1", "localhost:7051", "msp1", 3},
+				{"id3", "peer3:10051", "msp2", 4},
+			},
+			interest: &peer.ChaincodeInterest{
+				Chaincodes: []*peer.ChaincodeCall{{
+					Name:            testChaincode,
+					CollectionNames: []string{"mycollection1", "mycollection2"},
+					NoPrivateReads:  true,
+				}},
+			},
+			transientData: map[string][]byte{"transient-key": []byte("transient-value")},
+			postSetup: func(t *testing.T, def *preparedTest) {
+				def.discovery.PeersForEndorsementReturnsOnCall(0, nil, errors.New("protect-transient"))
+			},
+			errCode:   codes.FailedPrecondition,
+			errString: "requires endorsement from organisation(s) that are not in the distribution policy of the private data collection(s): [mycollection1 mycollection2]; retry specifying trusted endorsing organizations to protect transient data",
+		},
+		{
 			name: "extra endorsers with transient data",
 			plan: endorsementPlan{
 				"g1": {{endorser: localhostMock, height: 4}, {endorser: peer1Mock, height: 4}}, // msp1
@@ -761,6 +797,58 @@ func TestEndorse(t *testing.T) {
 					MspId:   "msp2",
 					Message: "ProposalResponsePayloads do not match",
 				},
+			},
+			postSetup: func(t *testing.T, def *preparedTest) {
+				logObserver := &mock.Observer{}
+				logObserver.WriteEntryStub = func(entry zapcore.Entry, fields []zapcore.Field) {
+					if strings.HasPrefix(entry.Message, "Proposal response mismatch") {
+						for _, field := range fields {
+							def.logFields = append(def.logFields, field.String)
+						}
+					}
+				}
+				flogging.SetObserver(logObserver)
+			},
+			postTest: func(t *testing.T, def *preparedTest) {
+				require.Equal(t, "chaincode response mismatch", def.logFields[0])
+				require.Equal(t, "status: 200, message: , payload: different_response", def.logFields[1])
+				require.Equal(t, "status: 200, message: , payload: mock_response", def.logFields[2])
+				flogging.SetObserver(nil)
+			},
+		},
+		{
+			name: "non-matching response logging suppressed",
+			plan: endorsementPlan{
+				"g1": {{endorser: localhostMock, height: 4}}, // msp1
+				"g2": {{endorser: peer2Mock, height: 5}},     // msp2
+			},
+			localResponse: "different_response",
+			errCode:       codes.Aborted,
+			errString:     "failed to collect enough transaction endorsements",
+			errDetails: []*pb.ErrorDetail{
+				{
+					Address: "peer2:9051",
+					MspId:   "msp2",
+					Message: "ProposalResponsePayloads do not match",
+				},
+			},
+			postSetup: func(t *testing.T, def *preparedTest) {
+				def.logLevel = flogging.LoggerLevel("gateway.responsechecker")
+				flogging.ActivateSpec("error")
+				logObserver := &mock.Observer{}
+				logObserver.WriteEntryStub = func(entry zapcore.Entry, fields []zapcore.Field) {
+					if strings.HasPrefix(entry.Message, "Proposal response mismatch") {
+						for _, field := range fields {
+							def.logFields = append(def.logFields, field.String)
+						}
+					}
+				}
+				flogging.SetObserver(logObserver)
+			},
+			postTest: func(t *testing.T, def *preparedTest) {
+				require.Empty(t, def.logFields)
+				flogging.ActivateSpec(def.logLevel)
+				flogging.SetObserver(nil)
 			},
 		},
 		{
@@ -915,14 +1003,15 @@ func TestEndorse(t *testing.T) {
 				"g2": {{endorser: peer4Mock, height: 5}},     // msp3
 			},
 			postSetup: func(t *testing.T, def *preparedTest) {
-				var cancel context.CancelFunc
-				def.ctx, cancel = context.WithTimeout(def.ctx, 100*time.Millisecond)
+				def.ctx, def.cancel = context.WithTimeout(def.ctx, 100*time.Millisecond)
 
 				def.localEndorser.ProcessProposalStub = func(ctx context.Context, proposal *peer.SignedProposal, option ...grpc.CallOption) (*peer.ProposalResponse, error) {
-					cancel()
 					time.Sleep(200 * time.Millisecond)
 					return createProposalResponse(t, peer1Mock.address, "mock_response", 200, ""), nil
 				}
+			},
+			postTest: func(t *testing.T, def *preparedTest) {
+				def.cancel()
 			},
 			errCode:   codes.DeadlineExceeded,
 			errString: "endorsement timeout expired while collecting first endorsement",
@@ -934,14 +1023,15 @@ func TestEndorse(t *testing.T) {
 				"g2": {{endorser: peer4Mock, height: 5}},     // msp3
 			},
 			postSetup: func(t *testing.T, def *preparedTest) {
-				var cancel context.CancelFunc
-				def.ctx, cancel = context.WithTimeout(def.ctx, 100*time.Millisecond)
+				def.ctx, def.cancel = context.WithTimeout(def.ctx, 100*time.Millisecond)
 
 				peer4Mock.client.(*mocks.EndorserClient).ProcessProposalStub = func(ctx context.Context, proposal *peer.SignedProposal, option ...grpc.CallOption) (*peer.ProposalResponse, error) {
-					cancel()
 					time.Sleep(200 * time.Millisecond)
 					return createProposalResponse(t, peer4Mock.address, "mock_response", 200, ""), nil
 				}
+			},
+			postTest: func(t *testing.T, def *preparedTest) {
+				def.cancel()
 			},
 			errCode:   codes.DeadlineExceeded,
 			errString: "endorsement timeout expired while collecting endorsements",
@@ -955,6 +1045,9 @@ func TestEndorse(t *testing.T) {
 
 			if checkError(t, &tt, err) {
 				require.Nil(t, response, "response on error")
+				if tt.postTest != nil {
+					tt.postTest(t, test)
+				}
 				return
 			}
 
@@ -971,6 +1064,10 @@ func TestEndorse(t *testing.T) {
 
 			// check the correct endorsers (mocks) were called with the right parameters
 			checkEndorsers(t, tt.expectedEndorsers, test)
+
+			if tt.postTest != nil {
+				tt.postTest(t, test)
+			}
 		})
 	}
 }
@@ -1865,6 +1962,7 @@ func TestNilArgs(t *testing.T) {
 		"msp1",
 		&comm.SecureOptions{},
 		config.GetOptions(viper.New()),
+		nil,
 	)
 	ctx := context.Background()
 
@@ -1874,10 +1972,75 @@ func TestNilArgs(t *testing.T) {
 	_, err = server.Evaluate(ctx, &pb.EvaluateRequest{ProposedTransaction: nil})
 	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "failed to unpack transaction proposal: a signed proposal is required"))
 
+	_, err = server.Evaluate(ctx, &pb.EvaluateRequest{ProposedTransaction: &peer.SignedProposal{}})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "failed to unpack transaction proposal: a signed proposal is required"))
+
+	_, err = server.Evaluate(ctx, &pb.EvaluateRequest{ProposedTransaction: &peer.SignedProposal{ProposalBytes: []byte("jibberish")}})
+	require.ErrorContains(t, err, "failed to unpack transaction proposal: error unmarshalling Proposal")
+
+	request := &pb.EvaluateRequest{ProposedTransaction: &peer.SignedProposal{
+		ProposalBytes: protoutil.MarshalOrPanic(&peer.Proposal{
+			Header: protoutil.MarshalOrPanic(&cp.Header{}),
+			Payload: protoutil.MarshalOrPanic(&peer.ChaincodeActionPayload{
+				ChaincodeProposalPayload: protoutil.MarshalOrPanic(&peer.ChaincodeProposalPayload{
+					Input: protoutil.MarshalOrPanic(&peer.ChaincodeInvocationSpec{
+						ChaincodeSpec: &peer.ChaincodeSpec{
+							ChaincodeId: &peer.ChaincodeID{
+								Name: "testChaincode",
+							},
+						},
+					}),
+				}),
+			}),
+		}),
+	}}
+	require.True(t, len(request.GetProposedTransaction().GetProposalBytes()) != 0)
+	_, err = server.Evaluate(ctx, request)
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "failed to unpack transaction proposal: no channel id provided"))
+
+	_, err = server.Evaluate(ctx, &pb.EvaluateRequest{ProposedTransaction: &peer.SignedProposal{
+		ProposalBytes: protoutil.MarshalOrPanic(&peer.Proposal{
+			Header: protoutil.MarshalOrPanic(&cp.Header{
+				ChannelHeader: protoutil.MarshalOrPanic(&cp.ChannelHeader{
+					ChannelId: "test",
+				}),
+			}),
+			Payload: protoutil.MarshalOrPanic(&peer.ChaincodeActionPayload{
+				ChaincodeProposalPayload: protoutil.MarshalOrPanic(&peer.ChaincodeProposalPayload{
+					Input: nil,
+				}),
+			}),
+		}),
+	}})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "failed to unpack transaction proposal: no chaincode spec is provided, channel id [test]"))
+
+	_, err = server.Evaluate(ctx, &pb.EvaluateRequest{ProposedTransaction: &peer.SignedProposal{
+		ProposalBytes: protoutil.MarshalOrPanic(&peer.Proposal{
+			Header: protoutil.MarshalOrPanic(&cp.Header{
+				ChannelHeader: protoutil.MarshalOrPanic(&cp.ChannelHeader{
+					ChannelId: "test",
+				}),
+			}),
+			Payload: protoutil.MarshalOrPanic(&peer.ChaincodeActionPayload{
+				ChaincodeProposalPayload: protoutil.MarshalOrPanic(&peer.ChaincodeProposalPayload{
+					Input: protoutil.MarshalOrPanic(&peer.ChaincodeSpec{
+						ChaincodeId: &peer.ChaincodeID{
+							Name: "",
+						},
+					}),
+				}),
+			}),
+		}),
+	}})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "failed to unpack transaction proposal: no chaincode name is provided, channel id [test]"))
+
 	_, err = server.Endorse(ctx, nil)
 	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "an endorse request is required"))
 
 	_, err = server.Endorse(ctx, &pb.EndorseRequest{ProposedTransaction: nil})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "the proposed transaction must contain a signed proposal"))
+
+	_, err = server.Endorse(ctx, &pb.EndorseRequest{ProposedTransaction: &peer.SignedProposal{}})
 	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "the proposed transaction must contain a signed proposal"))
 
 	_, err = server.Endorse(ctx, &pb.EndorseRequest{ProposedTransaction: &peer.SignedProposal{ProposalBytes: []byte("jibberish")}})
@@ -1886,8 +2049,20 @@ func TestNilArgs(t *testing.T) {
 	_, err = server.Submit(ctx, nil)
 	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "a submit request is required"))
 
+	_, err = server.Submit(ctx, &pb.SubmitRequest{})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "a prepared transaction is required"))
+
 	_, err = server.CommitStatus(ctx, nil)
 	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "a commit status request is required"))
+
+	_, err = server.CommitStatus(ctx, &pb.SignedCommitStatusRequest{})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "a commit status request is required"))
+
+	err = server.ChaincodeEvents(nil, &mocks.ChaincodeEventsServer{})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "a chaincode events request is required"))
+
+	err = server.ChaincodeEvents(&pb.SignedChaincodeEventsRequest{}, &mocks.ChaincodeEventsServer{})
+	require.ErrorIs(t, err, status.Error(codes.InvalidArgument, "a chaincode events request is required"))
 }
 
 func TestRpcErrorWithBadDetails(t *testing.T) {
@@ -2007,7 +2182,7 @@ func prepareTest(t *testing.T, tt *testDef) *preparedTest {
 		Endpoint: "localhost:7051",
 	}
 
-	server := newServer(localEndorser, disc, mockFinder, mockPolicy, mockLedgerProvider, member, "msp1", &comm.SecureOptions{}, options)
+	server := newServer(localEndorser, disc, mockFinder, mockPolicy, mockLedgerProvider, member, "msp1", &comm.SecureOptions{}, options, nil)
 
 	dialer := &mocks.Dialer{}
 	dialer.Returns(nil, nil)

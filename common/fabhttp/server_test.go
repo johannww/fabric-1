@@ -18,7 +18,7 @@ import (
 
 	"github.com/hyperledger/fabric/common/fabhttp"
 	"github.com/hyperledger/fabric/core/operations/fakes"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/tedsuo/ifrit"
 )
@@ -85,7 +85,7 @@ var _ = Describe("Server", func() {
 
 			addApiURL := fmt.Sprintf("https://%s%s", server.Addr(), AdditionalTestApiPath)
 			_, err = client.Get(addApiURL)
-			Expect(err.Error()).To(ContainSubstring("tls: protocol version not supported"))
+			Expect(err.Error()).To(ContainSubstring("tls: no supported versions satisfy MinVersion and MaxVersion"))
 		})
 	})
 

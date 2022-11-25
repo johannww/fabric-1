@@ -15,7 +15,7 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/hyperledger/fabric/integration/nwo"
 	"github.com/hyperledger/fabric/integration/nwo/commands"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
@@ -64,9 +64,9 @@ var _ = Describe("EndToEnd", func() {
 		os.RemoveAll(testDir)
 	})
 
-	Describe("basic solo network with 2 orgs", func() {
+	Describe("basic etcdraft network with 2 orgs", func() {
 		BeforeEach(func() {
-			network = nwo.New(nwo.BasicSoloWithIdemix(), testDir, client, StartPort(), components)
+			network = nwo.New(nwo.BasicEtcdRaftWithIdemix(), testDir, client, StartPort(), components)
 			network.GenerateConfigTree()
 			network.Bootstrap()
 
@@ -75,7 +75,7 @@ var _ = Describe("EndToEnd", func() {
 			Eventually(process.Ready(), network.EventuallyTimeout).Should(BeClosed())
 		})
 
-		It("executes a basic solo network with 2 orgs", func() {
+		It("executes a basic etcdraft network with 2 orgs", func() {
 			By("getting the orderer by name")
 			orderer := network.Orderer("orderer")
 

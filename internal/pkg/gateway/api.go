@@ -28,12 +28,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type endorserResponse struct {
-	action         *peer.ChaincodeEndorsedAction
-	err            *gp.ErrorDetail
-	timeoutExpired bool
-}
-
 // Evaluate will invoke the transaction function as specified in the SignedProposal
 func (gs *Server) Evaluate(ctx context.Context, request *gp.EvaluateRequest) (*gp.EvaluateResponse, error) {
 	if request == nil {
@@ -69,7 +63,7 @@ func (gs *Server) Evaluate(ctx context.Context, request *gp.EvaluateRequest) (*g
 	var response *peer.Response
 	var errDetails []proto.Message
 	for response == nil {
-		gs.logger.Debugw("Sending to peer:", "channel", channel, "chaincode", chaincodeID, "txID", request.TransactionId, "MSPID", endorser.mspid, "endpoint", endorser.address)
+		gs.logger.Debugw("Sending to peer:", "channel", channel, "chaincode", chaincodeID, "txID", request.GetTransactionId(), "MSPID", endorser.mspid, "endpoint", endorser.address)
 
 		done := make(chan error)
 		go func() {
@@ -84,10 +78,10 @@ func (gs *Server) Evaluate(ctx context.Context, request *gp.EvaluateRequest) (*g
 				if result, err := getResultFromProposalResponse(pr); err == nil {
 					response.Payload = result
 				} else {
-					logger.Warnw("Successful proposal response contained no transaction result", "error", err.Error(), "chaincode", chaincodeID, "channel", channel, "txID", request.TransactionId, "endorserAddress", endorser.endpointConfig.address, "endorserMspid", endorser.endpointConfig.mspid, "status", response.Status, "message", response.Message)
+					logger.Warnw("Successful proposal response contained no transaction result", "error", err.Error(), "chaincode", chaincodeID, "channel", channel, "txID", request.GetTransactionId(), "endorserAddress", endorser.endpointConfig.address, "endorserMspid", endorser.endpointConfig.mspid, "status", response.GetStatus(), "message", response.GetMessage())
 				}
 			} else {
-				logger.Debugw("Evaluate call to endorser failed", "chaincode", chaincodeID, "channel", channel, "txID", request.TransactionId, "endorserAddress", endorser.endpointConfig.address, "endorserMspid", endorser.endpointConfig.mspid, "error", message)
+				logger.Debugw("Evaluate call to endorser failed", "chaincode", chaincodeID, "channel", channel, "txID", request.GetTransactionId(), "endorserAddress", endorser.endpointConfig.address, "endorserMspid", endorser.endpointConfig.mspid, "error", message)
 				errDetails = append(errDetails, errorDetail(endorser.endpointConfig, message))
 				if remove {
 					gs.registry.removeEndorser(endorser)
@@ -109,7 +103,7 @@ func (gs *Server) Evaluate(ctx context.Context, request *gp.EvaluateRequest) (*g
 			}
 		case <-ctx.Done():
 			// Overall evaluation timeout expired
-			logger.Warnw("Evaluate call timed out while processing request", "channel", request.ChannelId, "txID", request.TransactionId)
+			logger.Warnw("Evaluate call timed out while processing request", "channel", request.GetChannelId(), "txID", request.GetTransactionId())
 			return nil, newRpcError(codes.DeadlineExceeded, "evaluate timeout expired")
 		}
 	}
@@ -118,7 +112,7 @@ func (gs *Server) Evaluate(ctx context.Context, request *gp.EvaluateRequest) (*g
 		Result: response,
 	}
 
-	logger.Debugw("Evaluate call to endorser returned success", "channel", request.ChannelId, "txID", request.TransactionId, "endorserAddress", endorser.endpointConfig.address, "endorserMspid", endorser.endpointConfig.mspid, "status", response.GetStatus(), "message", response.GetMessage())
+	logger.Debugw("Evaluate call to endorser returned success", "channel", request.GetChannelId(), "txID", request.GetTransactionId(), "endorserAddress", endorser.endpointConfig.address, "endorserMspid", endorser.endpointConfig.mspid, "status", response.GetStatus(), "message", response.GetMessage())
 	return evaluateResponse, nil
 }
 
@@ -129,41 +123,41 @@ func (gs *Server) Endorse(ctx context.Context, request *gp.EndorseRequest) (*gp.
 		return nil, status.Error(codes.InvalidArgument, "an endorse request is required")
 	}
 	signedProposal := request.GetProposedTransaction()
-	if signedProposal == nil {
+	if len(signedProposal.GetProposalBytes()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "the proposed transaction must contain a signed proposal")
 	}
-	proposal, err := protoutil.UnmarshalProposal(signedProposal.ProposalBytes)
+	proposal, err := protoutil.UnmarshalProposal(signedProposal.GetProposalBytes())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	header, err := protoutil.UnmarshalHeader(proposal.Header)
+	header, err := protoutil.UnmarshalHeader(proposal.GetHeader())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	channelHeader, err := protoutil.UnmarshalChannelHeader(header.ChannelHeader)
+	channelHeader, err := protoutil.UnmarshalChannelHeader(header.GetChannelHeader())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	payload, err := protoutil.UnmarshalChaincodeProposalPayload(proposal.Payload)
+	payload, err := protoutil.UnmarshalChaincodeProposalPayload(proposal.GetPayload())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	spec, err := protoutil.UnmarshalChaincodeInvocationSpec(payload.Input)
+	spec, err := protoutil.UnmarshalChaincodeInvocationSpec(payload.GetInput())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	channel := channelHeader.ChannelId
+	channel := channelHeader.GetChannelId()
 	chaincodeID := spec.GetChaincodeSpec().GetChaincodeId().GetName()
 	hasTransientData := len(payload.GetTransientMap()) > 0
 
-	logger := gs.logger.With("channel", channel, "chaincode", chaincodeID, "txID", request.TransactionId)
+	logger := gs.logger.With("channel", channel, "chaincode", chaincodeID, "txID", request.GetTransactionId())
 
 	var plan *plan
 	var action *peer.ChaincodeEndorsedAction
-	if len(request.EndorsingOrganizations) > 0 {
+	if len(request.GetEndorsingOrganizations()) > 0 {
 		// The client is specifying the endorsing orgs and taking responsibility for ensuring it meets the signature policy
-		plan, err = gs.registry.planForOrgs(channel, chaincodeID, request.EndorsingOrganizations)
+		plan, err = gs.registry.planForOrgs(channel, chaincodeID, request.GetEndorsingOrganizations())
 		if err != nil {
 			return nil, status.Error(codes.Unavailable, err.Error())
 		}
@@ -340,9 +334,16 @@ func (gs *Server) planFromFirstEndorser(ctx context.Context, channel string, cha
 
 	// 4. If transient data is involved, then we need to ensure that discovery only returns orgs which own the collections involved.
 	// Do this by setting NoPrivateReads to false on each collection
+	originalInterest := &peer.ChaincodeInterest{}
+	var protectedCollections []string
 	if hasTransientData {
 		for _, call := range interest.GetChaincodes() {
-			call.NoPrivateReads = false
+			ccc := *call // shallow copy
+			originalInterest.Chaincodes = append(originalInterest.Chaincodes, &ccc)
+			if call.NoPrivateReads {
+				call.NoPrivateReads = false
+				protectedCollections = append(protectedCollections, call.CollectionNames...)
+			}
 		}
 	}
 
@@ -350,6 +351,13 @@ func (gs *Server) planFromFirstEndorser(ctx context.Context, channel string, cha
 	// The preferred discovery layout will contain the firstEndorser's Org.
 	plan, err = gs.registry.endorsementPlan(channel, interest, firstEndorser)
 	if err != nil {
+		if len(protectedCollections) > 0 {
+			// may have failed because of the cautious approach we are taking with transient data - check
+			_, err = gs.registry.endorsementPlan(channel, originalInterest, firstEndorser)
+			if err == nil {
+				return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("requires endorsement from organisation(s) that are not in the distribution policy of the private data collection(s): %v; retry specifying trusted endorsing organizations to protect transient data", protectedCollections))
+			}
+		}
 		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
 
@@ -470,25 +478,25 @@ func (gs *Server) broadcast(ctx context.Context, orderer *orderer, txn *common.E
 // If the transaction commit status cannot be returned, for example if the specified channel does not exist, a
 // FailedPrecondition error will be returned.
 func (gs *Server) CommitStatus(ctx context.Context, signedRequest *gp.SignedCommitStatusRequest) (*gp.CommitStatusResponse, error) {
-	if signedRequest == nil {
+	if len(signedRequest.GetRequest()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "a commit status request is required")
 	}
 
 	request := &gp.CommitStatusRequest{}
-	if err := proto.Unmarshal(signedRequest.Request, request); err != nil {
+	if err := proto.Unmarshal(signedRequest.GetRequest(), request); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid status request: %v", err)
 	}
 
 	signedData := &protoutil.SignedData{
-		Data:      signedRequest.Request,
-		Identity:  request.Identity,
-		Signature: signedRequest.Signature,
+		Data:      signedRequest.GetRequest(),
+		Identity:  request.GetIdentity(),
+		Signature: signedRequest.GetSignature(),
 	}
-	if err := gs.policy.CheckACL(resources.Gateway_CommitStatus, request.ChannelId, signedData); err != nil {
+	if err := gs.policy.CheckACL(resources.Gateway_CommitStatus, request.GetChannelId(), signedData); err != nil {
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 
-	txStatus, err := gs.commitFinder.TransactionStatus(ctx, request.ChannelId, request.TransactionId)
+	txStatus, err := gs.commitFinder.TransactionStatus(ctx, request.GetChannelId(), request.GetTransactionId())
 	if err != nil {
 		return nil, toRpcError(err, codes.Aborted)
 	}
@@ -506,21 +514,21 @@ func (gs *Server) CommitStatus(ctx context.Context, signedRequest *gp.SignedComm
 // events within each response message are presented in the same order that the transactions that emitted them appear
 // within the block.
 func (gs *Server) ChaincodeEvents(signedRequest *gp.SignedChaincodeEventsRequest, stream gp.Gateway_ChaincodeEventsServer) error {
-	if signedRequest == nil {
+	if len(signedRequest.GetRequest()) == 0 {
 		return status.Error(codes.InvalidArgument, "a chaincode events request is required")
 	}
 
 	request := &gp.ChaincodeEventsRequest{}
-	if err := proto.Unmarshal(signedRequest.Request, request); err != nil {
+	if err := proto.Unmarshal(signedRequest.GetRequest(), request); err != nil {
 		return status.Errorf(codes.InvalidArgument, "invalid chaincode events request: %v", err)
 	}
 
 	signedData := &protoutil.SignedData{
-		Data:      signedRequest.Request,
-		Identity:  request.Identity,
-		Signature: signedRequest.Signature,
+		Data:      signedRequest.GetRequest(),
+		Identity:  request.GetIdentity(),
+		Signature: signedRequest.GetSignature(),
 	}
-	if err := gs.policy.CheckACL(resources.Gateway_ChaincodeEvents, request.ChannelId, signedData); err != nil {
+	if err := gs.policy.CheckACL(resources.Gateway_ChaincodeEvents, request.GetChannelId(), signedData); err != nil {
 		return status.Error(codes.PermissionDenied, err.Error())
 	}
 
@@ -551,7 +559,7 @@ func (gs *Server) ChaincodeEvents(signedRequest *gp.SignedChaincodeEventsRequest
 		}
 
 		var matchingEvents []*peer.ChaincodeEvent
-		for _, event := range response.Events {
+		for _, event := range response.GetEvents() {
 			if isMatch(event) {
 				matchingEvents = append(matchingEvents, event)
 			}

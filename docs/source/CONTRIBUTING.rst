@@ -116,7 +116,7 @@ and reviews (a month or more) demonstrating a renewed commitment to the project.
 Releases
 ~~~~~~~~
 
-Fabric provides a release approximately once every four months with new features and improvements.
+Fabric provides periodic releases with new features and improvements.
 New feature work is merged to the Fabric main branch on `GitHub <https://github.com/hyperledger/fabric>`__.
 Releases branches are created prior to each release so that the code can stabilize while
 new features continue to get merged to the main branch.
@@ -206,7 +206,7 @@ sufficient information for someone else to reproduce the
 issue. One of the project's maintainers should respond to your issue within 24
 hours. If not, please bump the issue with a comment and request that it be
 reviewed. You can also post to the relevant Hyperledger Fabric channel in
-`Hyperledger Chat <https://chat.hyperledger.org>`__.  For example, a doc bug should
+`Hyperledger Discord <https://discord.com/servers/hyperledger-foundation-905194001349627914>`__.  For example, a doc bug should
 be broadcast to ``#fabric-documentation``, a database bug to ``#fabric-ledger``,
 and so on...
 

@@ -31,7 +31,7 @@ import (
 	"github.com/hyperledger/fabric/integration/nwo/runner"
 	"github.com/hyperledger/fabric/integration/pvtdata/marblechaincodeutil"
 	"github.com/hyperledger/fabric/protoutil"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
@@ -522,7 +522,7 @@ func initAndStartFourOrgsNetwork() *setup {
 	client, err := docker.NewClientFromEnv()
 	Expect(err).NotTo(HaveOccurred())
 
-	config := nwo.BasicSolo()
+	config := nwo.BasicEtcdRaft()
 
 	config.Channels = []*nwo.Channel{
 		{Name: testchannelID, Profile: "TwoOrgsChannel"},
@@ -636,8 +636,8 @@ func initAndStartFourOrgsNetwork() *setup {
 	}
 	Expect(setup.testDir).To(Equal(setup.network.RootDir))
 
-	By("starting broker and orderer")
-	setup.startBrokerAndOrderer()
+	By("starting orderer")
+	setup.startOrderer()
 
 	By("starting peers")
 	setup.startPeers()

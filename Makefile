@@ -21,7 +21,7 @@
 #   - docker-list - generates a list of docker images that 'make docker' produces
 #   - docker-tag-latest - re-tags the images made by 'make docker' with the :latest tag
 #   - docker-tag-stable - re-tags the images made by 'make docker' with the :stable tag
-#   - docker-thirdparty - pulls thirdparty images (kafka,zookeeper,couchdb)
+#   - docker-thirdparty - pulls thirdparty images (couchdb, etc)
 #   - docs - builds the documentation in html format
 #   - gotools - installs go tools like golint
 #   - help-docs - generate the command reference docs
@@ -46,14 +46,12 @@
 #   - unit-test - runs the go-test based unit tests
 #   - verify - runs unit tests for only the changed package tree
 
-ALPINE_VER ?= 3.14
-BASE_VERSION = 2.5.0
+ALPINE_VER ?= 3.16
+BASE_VERSION = 3.0.0
 
 # 3rd party image version
 # These versions are also set in the runners in ./integration/runners/
-COUCHDB_VER ?= 3.1.1
-KAFKA_VER ?= 5.3.1
-ZOOKEEPER_VER ?= 5.3.1
+COUCHDB_VER ?= 3.2.2
 
 # Disable implicit rules
 .SUFFIXES:
@@ -78,7 +76,7 @@ METADATA_VAR += CommitSHA=$(EXTRA_VERSION)
 METADATA_VAR += BaseDockerLabel=$(BASE_DOCKER_LABEL)
 METADATA_VAR += DockerNamespace=$(DOCKER_NS)
 
-GO_VER = 1.17.5
+GO_VER = 1.18.7
 GO_TAGS ?=
 
 RELEASE_EXES = orderer $(TOOLS_EXES)
@@ -145,7 +143,7 @@ check-go-version:
 
 .PHONY: integration-test
 integration-test: integration-test-prereqs
-	./scripts/run-integration-tests.sh
+	./scripts/run-integration-tests.sh $(INTEGRATION_TEST_SUITE)
 
 .PHONY: integration-test-prereqs
 integration-test-prereqs: gotool.ginkgo baseos-docker ccenv-docker docker-thirdparty ccaasbuilder
@@ -162,8 +160,6 @@ unit-tests: unit-test
 # can be built by a peer configured to use the ccenv-1.4 as the builder image.
 .PHONY: docker-thirdparty
 docker-thirdparty: docker-thirdparty-couchdb
-	docker pull confluentinc/cp-zookeeper:${ZOOKEEPER_VER}
-	docker pull confluentinc/cp-kafka:${KAFKA_VER}
 	docker pull hyperledger/fabric-ccenv:1.4
 
 .PHONY: docker-thirdparty-couchdb
@@ -226,11 +222,11 @@ $(BUILD_DIR)/bin/%: GO_LDFLAGS = $(METADATA_VAR:%=-X $(PKGNAME)/common/metadata.
 $(BUILD_DIR)/bin/%:
 	@echo "Building $@"
 	@mkdir -p $(@D)
-	GOBIN=$(abspath $(@D)) go install -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" $(pkgmap.$(@F))
+	GOBIN=$(abspath $(@D)) go install -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" -buildvcs=false $(pkgmap.$(@F))
 	@touch $@
 
 .PHONY: docker
-docker: $(RELEASE_IMAGES:%=%-docker)
+docker: $(RELEASE_IMAGES:%=%-docker) ccaasbuilder
 
 .PHONY: $(RELEASE_IMAGES:%=%-docker)
 $(RELEASE_IMAGES:%=%-docker): %-docker: $(BUILD_DIR)/images/%/$(DUMMY)
@@ -265,7 +261,7 @@ release-all: check-go-version $(RELEASE_PLATFORMS:%=release/%)
 .PHONY: $(RELEASE_PLATFORMS:%=release/%)
 $(RELEASE_PLATFORMS:%=release/%): GO_LDFLAGS = $(METADATA_VAR:%=-X $(PKGNAME)/common/metadata.%)
 $(RELEASE_PLATFORMS:%=release/%): release/%: $(foreach exe,$(RELEASE_EXES),release/%/bin/$(exe))
-$(RELEASE_PLATFORMS:%=release/%): ccaasbuilder
+$(RELEASE_PLATFORMS:%=release/%): release/%: ccaasbuilder/%
 
 # explicit targets for all platform executables
 $(foreach platform, $(RELEASE_PLATFORMS), $(RELEASE_EXES:%=release/$(platform)/bin/%)):
@@ -274,7 +270,7 @@ $(foreach platform, $(RELEASE_PLATFORMS), $(RELEASE_EXES:%=release/$(platform)/b
 	$(eval GOARCH = $(word 2,$(subst -, ,$(platform))))
 	@echo "Building $@ for $(GOOS)-$(GOARCH)"
 	mkdir -p $(@D)
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $@ -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" $(pkgmap.$(@F))
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $@ -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" -buildvcs=false $(pkgmap.$(@F))
 
 .PHONY: dist
 dist: dist-clean dist/$(MARCH)
@@ -347,11 +343,18 @@ docs:
 	@docker run --rm -v $$(pwd):/docs n42org/tox:3.4.0 sh -c 'cd /docs && tox -e docs'
 
 .PHONY: ccaasbuilder-clean
-ccaasbuilder-clean:
-	rm -rf $(MARCH:%=release/%)/bin/ccaas_builder
+ccaasbuilder-clean/%:
+	$(eval platform = $(patsubst ccaasbuilder/%,%,$@) )
+	cd ccaas_builder &&	rm -rf $(strip $(platform))
 
 .PHONY: ccaasbuilder
-ccaasbuilder: ccaasbuilder-clean
-	cd ccaas_builder && go test -v ./cmd/detect && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ ./cmd/detect/
-	cd ccaas_builder && go test -v ./cmd/build && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ ./cmd/build/
-	cd ccaas_builder && go test -v ./cmd/release && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ ./cmd/release/
+ccaasbuilder/%: ccaasbuilder-clean
+	$(eval platform = $(patsubst ccaasbuilder/%,%,$@) )
+	$(eval GOOS = $(word 1,$(subst -, ,$(platform))))
+	$(eval GOARCH = $(word 2,$(subst -, ,$(platform))))
+	@mkdir -p release/$(strip $(platform))/builders/ccaas/bin
+	cd ccaas_builder && go test -v ./cmd/detect && GOOS=$(GOOS) GOARCH=$(GOARCH) go build -buildvcs=false -o ../release/$(strip $(platform))/builders/ccaas/bin/ ./cmd/detect/
+	cd ccaas_builder && go test -v ./cmd/build && GOOS=$(GOOS) GOARCH=$(GOARCH) go build -buildvcs=false -o ../release/$(strip $(platform))/builders/ccaas/bin/ ./cmd/build/
+	cd ccaas_builder && go test -v ./cmd/release && GOOS=$(GOOS) GOARCH=$(GOARCH) go build -buildvcs=false -o ../release/$(strip $(platform))/builders/ccaas/bin/ ./cmd/release/
+
+ccaasbuilder: ccaasbuilder/$(MARCH)

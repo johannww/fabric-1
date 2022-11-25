@@ -24,11 +24,12 @@ import (
 	"github.com/hyperledger/fabric/integration/nwo/commands"
 	"github.com/hyperledger/fabric/integration/nwo/template"
 	"github.com/hyperledger/fabric/protoutil"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
 	"github.com/tedsuo/ifrit"
+	ginkgomon "github.com/tedsuo/ifrit/ginkgomon_v2"
 )
 
 func TestLifecycle(t *testing.T) {
@@ -134,13 +135,22 @@ func RunInvokeAndExpectFailure(n *nwo.Network, orderer *nwo.Orderer, chaincodeNa
 	ExpectWithOffset(1, sess.Err).To(gbytes.Say(expectedError))
 }
 
-func RestartNetwork(process ifrit.Process, network *nwo.Network) ifrit.Process {
-	process.Signal(syscall.SIGTERM)
-	Eventually(process.Wait(), network.EventuallyTimeout).Should(Receive())
-	networkRunner := network.NetworkGroupRunner()
-	process = ifrit.Invoke(networkRunner)
-	Eventually(process.Ready(), network.EventuallyTimeout).Should(BeClosed())
-	return process
+func RestartNetwork(ordererProcess, peerProcess ifrit.Process, network *nwo.Network) (*ginkgomon.Runner, ifrit.Process, ifrit.Runner, ifrit.Process) {
+	peerProcess.Signal(syscall.SIGTERM)
+	Eventually(peerProcess.Wait(), network.EventuallyTimeout).Should(Receive())
+	ordererProcess.Signal(syscall.SIGTERM)
+	Eventually(ordererProcess.Wait(), network.EventuallyTimeout).Should(Receive())
+
+	ordererRunner := network.OrdererRunner(network.Orderer("orderer"))
+	ordererProcess = ifrit.Invoke(ordererRunner)
+	Eventually(ordererProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
+	Eventually(ordererRunner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Raft leader changed: 0 -> 1 channel=testchannel node=1"))
+
+	peerGroupRunner := network.PeerGroupRunner()
+	peerProcess = ifrit.Invoke(peerGroupRunner)
+	Eventually(peerProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+	return ordererRunner, ordererProcess, peerGroupRunner, peerProcess
 }
 
 func SignedProposal(channel, chaincode string, signer *nwo.SigningIdentity, args ...string) (*pb.SignedProposal, *pb.Proposal, string) {
