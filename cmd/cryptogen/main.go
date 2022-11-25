@@ -45,10 +45,11 @@ type SpecData struct {
 }
 
 type NodeTemplate struct {
-	Count    int      `yaml:"Count"`
-	Start    int      `yaml:"Start"`
-	Hostname string   `yaml:"Hostname"`
-	SANS     []string `yaml:"SANS"`
+	Count              int      `yaml:"Count"`
+	Start              int      `yaml:"Start"`
+	Hostname           string   `yaml:"Hostname"`
+	SANS               []string `yaml:"SANS"`
+	PublicKeyAlgorithm string   `yaml:"PublicKeyAlgorithm"`
 }
 
 type NodeSpec struct {
@@ -172,6 +173,8 @@ PeerOrgs:
     # You may override the number of nodes (Count), the starting index (Start)
     # or the template used to construct the name (Hostname).
     #
+    # PublicKeyAlgorithm: Hosts' key algorithm ("ecdsa" or "ed25519")
+	#
     # Note: Template and Specs are not mutually exclusive.  You may define both
     # sections and the aggregate nodes will be created for you.  Take care with
     # name collisions
@@ -182,6 +185,7 @@ PeerOrgs:
       # Hostname: {{.Prefix}}{{.Index}} # default
       # SANS:
       #   - "{{.Hostname}}.alt.{{.Domain}}"
+	  # PublicKeyAlgorithm: "ecdsa"
 
     # ---------------------------------------------------------------------------
     # "Users"
@@ -335,13 +339,7 @@ func extendPeerOrg(orgSpec OrgSpec) {
 		}
 	}
 
-	var publicKeyAlg string
-	if orgSpec.Users.PublicKeyAlgorithm == "" {
-		publicKeyAlg = ECDSA
-	} else {
-		publicKeyAlg = orgSpec.Users.PublicKeyAlgorithm
-	}
-
+	publicKeyAlg := getPublicKeyAlg(orgSpec.Users.PublicKeyAlgorithm)
 	// TODO: add ability to specify usernames
 	users := []NodeSpec{}
 	for j := 1; j <= orgSpec.Users.Count; j++ {
@@ -483,6 +481,7 @@ func renderNodeSpec(domain string, spec *NodeSpec) error {
 }
 
 func renderOrgSpec(orgSpec *OrgSpec, prefix string) error {
+	publickKeyAlg := getPublicKeyAlg(orgSpec.Template.PublicKeyAlgorithm)
 	// First process all of our templated nodes
 	for i := 0; i < orgSpec.Template.Count; i++ {
 		data := HostnameData{
@@ -499,7 +498,7 @@ func renderOrgSpec(orgSpec *OrgSpec, prefix string) error {
 		spec := NodeSpec{
 			Hostname:           hostname,
 			SANS:               orgSpec.Template.SANS,
-			PublicKeyAlgorithm: ECDSA,
+			PublicKeyAlgorithm: publickKeyAlg,
 		}
 		orgSpec.Specs = append(orgSpec.Specs, spec)
 	}
@@ -559,13 +558,7 @@ func generatePeerOrg(baseDir string, orgSpec OrgSpec) {
 
 	generateNodes(peersDir, orgSpec.Specs, signCA, tlsCA, msp.PEER, orgSpec.EnableNodeOUs)
 
-	var publicKeyAlg string
-	if orgSpec.Users.PublicKeyAlgorithm == "" {
-		publicKeyAlg = ECDSA
-	} else {
-		publicKeyAlg = orgSpec.Users.PublicKeyAlgorithm
-	}
-
+	publicKeyAlg := getPublicKeyAlg(orgSpec.Users.PublicKeyAlgorithm)
 	// TODO: add ability to specify usernames
 	users := []NodeSpec{}
 	for j := 1; j <= orgSpec.Users.Count; j++ {
@@ -759,4 +752,13 @@ func getCA(caDir string, spec OrgSpec, name string) *ca.CA {
 		StreetAddress:      spec.CA.StreetAddress,
 		PostalCode:         spec.CA.PostalCode,
 	}
+}
+
+func getPublicKeyAlg(pubAlgFromConfig string) (publicKeyAlg string) {
+	if pubAlgFromConfig == "" {
+		publicKeyAlg = ECDSA
+	} else {
+		publicKeyAlg = pubAlgFromConfig
+	}
+	return
 }
