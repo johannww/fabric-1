@@ -139,6 +139,7 @@ func (ks *fileBasedKeyStore) GetKey(ski []byte) (bccsp.Key, error) {
 		case *ecdsa.PrivateKey:
 			return &ecdsaPrivateKey{key.(*ecdsa.PrivateKey)}, nil
 		case ed25519.PrivateKey:
+			k := key.(ed25519.PrivateKey)
 			return &ed25519PrivateKey{&k}, nil
 		case *rsa.PrivateKey:
 			return &rsaPrivateKey{key.(*rsa.PrivateKey)}, nil
@@ -156,6 +157,7 @@ func (ks *fileBasedKeyStore) GetKey(ski []byte) (bccsp.Key, error) {
 		case *ecdsa.PublicKey:
 			return &ecdsaPublicKey{key.(*ecdsa.PublicKey)}, nil
 		case ed25519.PublicKey:
+			k := key.(ed25519.PublicKey)
 			return &ed25519PublicKey{&k}, nil
 		case *rsa.PublicKey:
 			return &rsaPublicKey{key.(*rsa.PublicKey)}, nil
@@ -195,12 +197,14 @@ func (ks *fileBasedKeyStore) StoreKey(k bccsp.Key) (err error) {
 		}
 
 	case *ed25519PrivateKey:
+		kk := k.(*ed25519PrivateKey)
 		err = ks.storePrivateKey(hex.EncodeToString(k.SKI()), kk.privKey)
 		if err != nil {
 			return fmt.Errorf("failed storing ED25519 private key [%s]", err)
 		}
 
 	case *ed25519PublicKey:
+		kk := k.(*ed25519PublicKey)
 		err = ks.storePublicKey(hex.EncodeToString(k.SKI()), kk.pubKey)
 		if err != nil {
 			return fmt.Errorf("failed storing ED25519 public key [%s]", err)
@@ -263,6 +267,7 @@ func (ks *fileBasedKeyStore) searchKeystoreForSKI(ski []byte) (k bccsp.Key, err 
 		case *ecdsa.PrivateKey:
 			k = &ecdsaPrivateKey{key.(*ecdsa.PrivateKey)}
 		case ed25519.PrivateKey:
+			kk := key.(ed25519.PrivateKey)
 			k = &ed25519PrivateKey{&kk}
 		case *rsa.PrivateKey:
 			k = &rsaPrivateKey{key.(*rsa.PrivateKey)}
